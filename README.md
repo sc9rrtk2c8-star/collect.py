@@ -1,5 +1,3 @@
-curl -sL -o collect.py https://raw.githubusercontent.com/sc9rrtk2c8-star/collect.py/main/README.md
-python collect.py
 # -*- coding: utf-8 -*-
 import sys, os
 import re
@@ -25,6 +23,7 @@ HEADERS = {
 URL_RACELIST = "https://www.boatrace.jp/owpc/pc/race/racelist"
 URL_BEFORE = "https://www.boatrace.jp/owpc/pc/race/beforeinfo"
 URL_ODDS3T = "https://www.boatrace.jp/owpc/pc/race/odds3t"
+URL_RESULT = "https://www.boatrace.jp/owpc/pc/race/raceresult"
 
 
 def _num(s):
@@ -323,9 +322,42 @@ def collect(jcd, hd, only_rno=None):
             print(f"OK   {rid}  {len(race.get('racers',[]))}艇 odds={len(race.get('odds',{}))}点")
         except Exception as e:
             print(f"FAIL {rid}: {e}")
-        time.sleep(2.5)
+        time.sleep(0.8)
     save_dataset(rows)
     print(f"--- {added}件追加 / 合計 {len(rows)}件 ---")
+
+
+def fetch_result(jcd, rno, hd):
+    sess = requests.Session()
+    try:
+        html = _get(URL_RESULT, jcd, rno, hd, sess)
+    except Exception as e:
+        print(f"[warn] result取得失敗 {race_id(jcd,hd,rno)}: {e}")
+        return None
+    text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+    m = re.search(r"3連単\s*([1-6])\s*-\s*([1-6])\s*-\s*([1-6])", text)
+    if m:
+        return [int(m.group(1)), int(m.group(2)), int(m.group(3))]
+    return None
+
+
+def fetch_results(jcd, hd):
+    rows = load_dataset()
+    done = 0
+    for r in rows:
+        if r["jcd"] != jcd or r["hd"] != hd or r["result"]:
+            continue
+        res = fetch_result(jcd, r["rno"], hd)
+        if res:
+            r["result"] = res
+            done += 1
+            print(f"着順取得 {r['race_id']} -> {res}")
+        else:
+            print(f"未確定/失敗 {r['race_id']}")
+        time.sleep(0.8)
+    save_dataset(rows)
+    print(f"--- {done}件の着順を記録 ---")
+
 
 def add_result(rid, finish):
     rows = load_dataset()
@@ -337,15 +369,19 @@ def add_result(rid, finish):
             return
     print(f"該当無し: {rid}")
 
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if not a:
         print("使い方:")
-        print("  python collect.py 01 20260623")
-        print("  python collect.py 01 20260623 1")
-        print("  python collect.py result 20260623-01-01 1 2 3")
+        print("  python collect.py 06 20260624        # 1会場12R収集")
+        print("  python collect.py 06 20260624 1      # 1Rだけ")
+        print("  python collect.py fetchresults 06 20260624  # 着順一括取得")
+        print("  python collect.py result 20260624-06-01 1 2 3  # 着順手動")
         sys.exit()
-    if a[0] == "result":
+    if a[0] == "fetchresults":
+        fetch_results(int(a[1]), a[2])
+    elif a[0] == "result":
         add_result(a[1], [int(x) for x in a[2:5]])
     else:
         jcd = int(a[0]); hd = a[1]
